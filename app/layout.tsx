@@ -22,22 +22,22 @@ export async function generateMetadata(): Promise<Metadata> {
   const ogImage = `${protocol}://${host}/og.png`;
 
   return {
-    title: "Dashboard A.I Invoice Studio",
+    title: "Dashboard A.I — Professional Invoice Maker",
     description:
-      "Create, save, and print professional invoices for DASHBOARD A.I LTD.",
+      "Create branded invoices, save customer history, and export professional PDFs from £5 per month.",
     icons: {
       icon: "/dashboard-ai-logo-full.png",
       shortcut: "/dashboard-ai-logo-full.png",
     },
     openGraph: {
-      title: "Dashboard A.I Invoice Studio",
+      title: "Dashboard A.I — Professional Invoice Maker",
       description: "Create. Save. Get paid.",
       images: [{ url: ogImage, width: 1200, height: 630 }],
       type: "website",
     },
     twitter: {
       card: "summary_large_image",
-      title: "Dashboard A.I Invoice Studio",
+      title: "Dashboard A.I — Professional Invoice Maker",
       description: "Create. Save. Get paid.",
       images: [ogImage],
     },

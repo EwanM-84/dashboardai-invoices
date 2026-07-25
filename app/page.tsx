@@ -1,623 +1,696 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import InvoiceDashboard, {
+  type CompanyProfile,
+  type Invoice,
+} from "./components/InvoiceDashboard";
+import {
+  isSupabaseConfigured,
+  supabase,
+} from "@/lib/supabase/client";
 
-type LineItem = {
+type Profile = {
   id: string;
-  description: string;
-  quantity: number;
-  rate: number;
+  email: string | null;
+  company_name: string;
+  company_address: string;
+  company_number: string;
+  account_number: string;
+  sort_code: string;
+  logo_url: string;
+  plan: "none" | "starter" | "pro" | "owner";
+  subscription_status: string;
+  stripe_customer_id: string | null;
+  owner_bypass: boolean;
 };
 
-type Invoice = {
-  id: string;
-  number: string;
-  client: string;
-  email: string;
-  address: string;
-  issueDate: string;
-  dueDate: string;
-  items: LineItem[];
-  vatRate: number;
-  notes: string;
-  status: "Draft" | "Sent" | "Paid";
-  savedAt: string;
-};
-
-const COMPANY = {
+const previewCompany: CompanyProfile = {
   name: "DASHBOARD A.I LTD",
   address: "61 Bridge Street, Kington, United Kingdom, HR5 3DJ",
-  number: "17319299",
-  account: "90411675",
+  companyNumber: "17319299",
+  accountNumber: "90411675",
   sortCode: "23-01-63",
+  logoUrl: "/dashboard-ai-logo-full.png",
 };
 
-const today = () => new Date().toISOString().slice(0, 10);
-const addDays = (date: string, days: number) => {
-  const next = new Date(`${date}T12:00:00`);
-  next.setDate(next.getDate() + days);
-  return next.toISOString().slice(0, 10);
-};
-const money = (value: number) =>
-  new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP",
-  }).format(value);
-
-const blankInvoice = (number = "INV-0001"): Invoice => ({
-  id: `invoice-${Date.now()}`,
-  number,
-  client: "",
-  email: "",
-  address: "",
-  issueDate: today(),
-  dueDate: addDays(today(), 14),
-  items: [
-    {
-      id: `item-${Date.now()}`,
-      description: "AI consulting services",
-      quantity: 1,
-      rate: 750,
-    },
-  ],
-  vatRate: 20,
-  notes: "Thank you for your business. Payment is due within 14 days.",
-  status: "Draft",
-  savedAt: new Date().toISOString(),
-});
-
-function calculate(invoice: Invoice) {
-  const subtotal = invoice.items.reduce(
-    (sum, item) => sum + Number(item.quantity || 0) * Number(item.rate || 0),
-    0,
-  );
-  const vat = subtotal * (Number(invoice.vatRate || 0) / 100);
-  return { subtotal, vat, total: subtotal + vat };
+function profileToCompany(profile: Profile): CompanyProfile {
+  return {
+    name: profile.company_name,
+    address: profile.company_address,
+    companyNumber: profile.company_number,
+    accountNumber: profile.account_number,
+    sortCode: profile.sort_code,
+    logoUrl: profile.logo_url,
+  };
 }
 
 export default function Home() {
-  const [activeView, setActiveView] = useState<"overview" | "invoices" | "company">(
-    "invoices",
-  );
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [invoice, setInvoice] = useState<Invoice>(() => blankInvoice());
-  const [savedMessage, setSavedMessage] = useState("");
+  const [loading, setLoading] = useState(isSupabaseConfigured);
+  const [preview, setPreview] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<"signup" | "signin">("signup");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [working, setWorking] = useState(false);
+  const [ownerCode, setOwnerCode] = useState("");
+  const [editingCompany, setEditingCompany] = useState(false);
+  const [companyDraft, setCompanyDraft] =
+    useState<CompanyProfile>(previewCompany);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("dashboard-ai-invoices");
-    if (!stored) return;
-    try {
-      const parsed = JSON.parse(stored) as Invoice[];
-      setInvoices(parsed);
-      if (parsed[0]) setInvoice(parsed[0]);
-    } catch {
-      window.localStorage.removeItem("dashboard-ai-invoices");
-    }
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      if (!nextSession) {
+        setProfile(null);
+        setInvoices([]);
+      }
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
-  const totals = useMemo(() => calculate(invoice), [invoice]);
-  const paidTotal = invoices
-    .filter((item) => item.status === "Paid")
-    .reduce((sum, item) => sum + calculate(item).total, 0);
-  const outstandingTotal = invoices
-    .filter((item) => item.status === "Sent")
-    .reduce((sum, item) => sum + calculate(item).total, 0);
+  useEffect(() => {
+    if (session) void loadAccount();
+  }, [session]); // loadAccount intentionally follows the active session
 
-  const update = <K extends keyof Invoice>(key: K, value: Invoice[K]) => {
-    setInvoice((current) => ({ ...current, [key]: value }));
-  };
-
-  const updateItem = (
-    id: string,
-    key: keyof Omit<LineItem, "id">,
-    value: string | number,
-  ) => {
-    update(
-      "items",
-      invoice.items.map((item) =>
-        item.id === id ? { ...item, [key]: value } : item,
-      ),
-    );
-  };
-
-  const saveInvoice = (status = invoice.status) => {
-    const saved = { ...invoice, status, savedAt: new Date().toISOString() };
-    const next = [saved, ...invoices.filter((item) => item.id !== saved.id)];
-    setInvoice(saved);
-    setInvoices(next);
-    window.localStorage.setItem("dashboard-ai-invoices", JSON.stringify(next));
-    setSavedMessage(status === "Draft" ? "Draft saved" : `Marked as ${status}`);
-    window.setTimeout(() => setSavedMessage(""), 2200);
-  };
-
-  const createInvoice = () => {
-    const highest = invoices.reduce((max, item) => {
-      const value = Number(item.number.replace(/\D/g, ""));
-      return Number.isFinite(value) ? Math.max(max, value) : max;
-    }, 0);
-    setInvoice(blankInvoice(`INV-${String(highest + 1).padStart(4, "0")}`));
-    setActiveView("invoices");
-  };
-
-  const addItem = () => {
-    update("items", [
-      ...invoice.items,
-      {
-        id: `item-${Date.now()}`,
-        description: "",
-        quantity: 1,
-        rate: 0,
-      },
+  async function loadAccount() {
+    if (!supabase || !session) return;
+    setLoading(true);
+    const [profileResult, invoiceResult] = await Promise.all([
+      supabase.from("profiles").select("*").eq("id", session.user.id).single(),
+      supabase
+        .from("invoices")
+        .select("data")
+        .eq("user_id", session.user.id)
+        .order("created_at", { ascending: false }),
     ]);
-  };
 
-  return (
-    <main className="app-shell">
-      <aside className="sidebar no-print">
-        <div className="brand">
-          <img
-            className="brand-logo"
-            src="/dashboard-ai-logo-full.png"
-            alt="Dashboard AI logo"
-          />
-          <div>
-            <strong>Dashboard A.I</strong>
-            <span>Invoice studio</span>
+    if (profileResult.error) {
+      setMessage(profileResult.error.message);
+    } else {
+      const nextProfile = profileResult.data as Profile;
+      setProfile(nextProfile);
+      setCompanyDraft(profileToCompany(nextProfile));
+      if (!nextProfile.company_name) setEditingCompany(true);
+    }
+
+    if (!invoiceResult.error) {
+      setInvoices(
+        (invoiceResult.data ?? []).map((row) => row.data as Invoice),
+      );
+    }
+    setLoading(false);
+  }
+
+  async function handleAuth(event: FormEvent) {
+    event.preventDefault();
+    if (!supabase) return;
+    setWorking(true);
+    setMessage("");
+
+    const result =
+      authMode === "signup"
+        ? await supabase.auth.signUp({ email, password })
+        : await supabase.auth.signInWithPassword({ email, password });
+
+    if (result.error) {
+      setMessage(result.error.message);
+    } else if (authMode === "signup" && !result.data.session) {
+      setMessage("Check your email to confirm your account, then sign in.");
+      setAuthMode("signin");
+    } else {
+      setMessage("");
+    }
+    setWorking(false);
+  }
+
+  async function authenticatedPost(path: string, body?: unknown) {
+    if (!session) throw new Error("Please sign in again");
+    const response = await fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    const data = (await response.json()) as {
+      error?: string;
+      url?: string;
+      success?: boolean;
+    };
+    if (!response.ok) throw new Error(data.error ?? "Request failed");
+    return data;
+  }
+
+  async function choosePlan(plan: "starter" | "pro") {
+    try {
+      setWorking(true);
+      setMessage("");
+      const { url } = await authenticatedPost("/api/stripe/checkout", { plan });
+      if (url) window.location.href = url;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Checkout failed");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function redeemOwnerCode(event: FormEvent) {
+    event.preventDefault();
+    try {
+      setWorking(true);
+      setMessage("");
+      await authenticatedPost("/api/owner-access", { code: ownerCode });
+      await loadAccount();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Code was not accepted");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function saveCompany(event: FormEvent) {
+    event.preventDefault();
+    if (!supabase || !session) return;
+    setWorking(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        company_name: companyDraft.name.trim(),
+        company_address: companyDraft.address.trim(),
+        company_number: companyDraft.companyNumber.trim(),
+        account_number: companyDraft.accountNumber.trim(),
+        sort_code: companyDraft.sortCode.trim(),
+        logo_url: companyDraft.logoUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", session.user.id);
+
+    if (error) setMessage(error.message);
+    else {
+      setEditingCompany(false);
+      await loadAccount();
+    }
+    setWorking(false);
+  }
+
+  async function uploadLogo(file?: File) {
+    if (!file || !supabase || !session) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setMessage("Logo must be smaller than 2 MB");
+      return;
+    }
+    const extension = file.name.split(".").pop()?.toLowerCase() || "png";
+    const path = `${session.user.id}/company-logo.${extension}`;
+    setWorking(true);
+    const { error } = await supabase.storage
+      .from("company-logos")
+      .upload(path, file, { upsert: true, contentType: file.type });
+    if (error) setMessage(error.message);
+    else {
+      const { data } = supabase.storage.from("company-logos").getPublicUrl(path);
+      setCompanyDraft((current) => ({
+        ...current,
+        logoUrl: `${data.publicUrl}?v=${Date.now()}`,
+      }));
+    }
+    setWorking(false);
+  }
+
+  async function saveInvoice(invoice: Invoice) {
+    if (!supabase || !session) return;
+    const total = invoice.items.reduce(
+      (sum, item) => sum + item.quantity * item.rate,
+      0,
+    );
+    const totalWithVat = total * (1 + invoice.vatRate / 100);
+    const { error } = await supabase.from("invoices").upsert({
+      id: invoice.id,
+      user_id: session.user.id,
+      invoice_number: invoice.number,
+      client_name: invoice.client,
+      status: invoice.status,
+      total: totalWithVat,
+      data: invoice,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw new Error(error.message);
+    setInvoices((current) => [
+      invoice,
+      ...current.filter((item) => item.id !== invoice.id),
+    ]);
+  }
+
+  async function manageBilling() {
+    try {
+      setWorking(true);
+      const { url } = await authenticatedPost("/api/stripe/portal");
+      if (url) window.location.href = url;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Billing is unavailable");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <main className="saas-loading">
+        <img src="/dashboard-ai-logo-full.png" alt="Dashboard AI" />
+        <p>Preparing your invoice studio…</p>
+      </main>
+    );
+  }
+
+  if (preview) {
+    return (
+      <>
+        <button className="exit-preview no-print" onClick={() => setPreview(false)}>
+          ← Exit preview
+        </button>
+        <InvoiceDashboard company={previewCompany} plan="owner" />
+      </>
+    );
+  }
+
+  if (!session) {
+    return (
+      <main className="saas-public">
+        <header className="marketing-nav">
+          <div className="marketing-brand">
+            <img src="/dashboard-ai-logo-full.png" alt="Dashboard AI" />
+            <div>
+              <strong>Dashboard A.I</strong>
+              <span>Invoice Studio</span>
+            </div>
           </div>
-        </div>
-
-        <nav aria-label="Main navigation">
-          <button
-            className={activeView === "overview" ? "nav-item active" : "nav-item"}
-            onClick={() => setActiveView("overview")}
-          >
-            <span>⌂</span> Overview
+          <button className="button secondary" onClick={() => setShowAuth(true)}>
+            Sign in
           </button>
-          <button
-            className={activeView === "invoices" ? "nav-item active" : "nav-item"}
-            onClick={() => setActiveView("invoices")}
-          >
-            <span>▤</span> Invoices
-          </button>
-          <button
-            className={activeView === "company" ? "nav-item active" : "nav-item"}
-            onClick={() => setActiveView("company")}
-          >
-            <span>□</span> Company
-          </button>
-        </nav>
-
-        <div className="sidebar-footer">
-          <div className="avatar">DA</div>
-          <div>
-            <strong>DASHBOARD A.I LTD</strong>
-            <span>Company no. {COMPANY.number}</span>
-          </div>
-        </div>
-      </aside>
-
-      <section className="workspace">
-        <header className="topbar no-print">
-          <div>
-            <span className="eyebrow">DASHBOARD A.I LTD</span>
-            <h1>
-              {activeView === "overview"
-                ? "Good afternoon"
-                : activeView === "company"
-                  ? "Company details"
-                  : "Create invoice"}
-            </h1>
-          </div>
-          <div className="top-actions">
-            {savedMessage && <span className="saved-message">✓ {savedMessage}</span>}
-            <button className="button secondary" onClick={() => saveInvoice("Draft")}>
-              Save draft
-            </button>
-            <button className="button primary" onClick={() => window.print()}>
-              Print / PDF
-            </button>
-          </div>
         </header>
 
-        {activeView === "overview" && (
-          <div className="overview no-print">
-            <div className="summary-grid">
-              <article className="summary-card dark-card">
-                <span>Paid this year</span>
-                <strong>{money(paidTotal)}</strong>
-                <small>{invoices.filter((item) => item.status === "Paid").length} invoices</small>
-              </article>
-              <article className="summary-card">
-                <span>Outstanding</span>
-                <strong>{money(outstandingTotal)}</strong>
-                <small>{invoices.filter((item) => item.status === "Sent").length} awaiting payment</small>
-              </article>
-              <article className="summary-card">
-                <span>Draft invoices</span>
-                <strong>{invoices.filter((item) => item.status === "Draft").length}</strong>
-                <small>Saved on this device</small>
-              </article>
+        <section className="hero">
+          <div className="hero-copy">
+            <span className="hero-kicker">INVOICING, WITHOUT THE FUSS</span>
+            <h1>Professional invoices. Paid faster.</h1>
+            <p>
+              Add your details and logo, create polished invoices in minutes,
+              and keep every customer invoice safely in one place.
+            </p>
+            <div className="hero-actions">
+              <button
+                className="button primary large"
+                onClick={() => {
+                  setAuthMode("signup");
+                  setShowAuth(true);
+                }}
+              >
+                Start for £5/month
+              </button>
+              <button
+                className="button secondary large"
+                onClick={() => setPreview(true)}
+              >
+                Preview the app
+              </button>
             </div>
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">RECENT ACTIVITY</span>
-                  <h2>Your invoices</h2>
-                </div>
-                <button className="button primary" onClick={createInvoice}>
-                  + New invoice
-                </button>
+            <div className="trust-line">
+              <span>✓ Secure customer accounts</span>
+              <span>✓ Cancel anytime</span>
+              <span>✓ Print or save PDF</span>
+            </div>
+          </div>
+          <div className="hero-product">
+            <div className="mini-window">
+              <div className="mini-window-top">
+                <i />
+                <i />
+                <i />
               </div>
-              {invoices.length === 0 ? (
-                <div className="empty-state">
-                  <div>▤</div>
-                  <h3>No saved invoices yet</h3>
-                  <p>Create your first invoice and it will appear here.</p>
-                  <button className="button secondary" onClick={createInvoice}>
-                    Create invoice
-                  </button>
+              <div className="mini-invoice">
+                <div className="mini-logo">D.AI</div>
+                <strong>INVOICE</strong>
+                <div className="mini-lines">
+                  <span />
+                  <span />
+                  <span />
                 </div>
-              ) : (
-                <div className="invoice-list">
-                  {invoices.map((item) => (
-                    <button
-                      key={item.id}
-                      className="invoice-row"
-                      onClick={() => {
-                        setInvoice(item);
-                        setActiveView("invoices");
-                      }}
-                    >
-                      <span>
-                        <strong>{item.client || "Untitled client"}</strong>
-                        <small>{item.number}</small>
-                      </span>
-                      <span className={`status ${item.status.toLowerCase()}`}>
-                        {item.status}
-                      </span>
-                      <strong>{money(calculate(item).total)}</strong>
-                    </button>
-                  ))}
+                <div className="mini-total">
+                  <span>Total due</span>
+                  <b>£900.00</b>
+                </div>
+              </div>
+              <div className="floating-paid">✓ Ready to send</div>
+            </div>
+          </div>
+        </section>
+
+        <section className="pricing-section" id="pricing">
+          <span className="hero-kicker">SIMPLE PRICING</span>
+          <h2>Choose the plan that fits</h2>
+          <p>No setup fees. Upgrade whenever your business grows.</p>
+          <div className="pricing-grid">
+            <article className="price-card">
+              <span>STARTER</span>
+              <h3>£5 <small>/ month</small></h3>
+              <p>For freelancers and small businesses.</p>
+              <ul>
+                <li>Up to 20 invoices each month</li>
+                <li>Your logo and company details</li>
+                <li>Save, print and export PDF</li>
+                <li>Secure invoice history</li>
+              </ul>
+              <button
+                className="button secondary large"
+                onClick={() => setShowAuth(true)}
+              >
+                Choose Starter
+              </button>
+            </article>
+            <article className="price-card featured">
+              <div className="popular">MOST POPULAR</div>
+              <span>PRO</span>
+              <h3>£20 <small>/ month</small></h3>
+              <p>For growing businesses that invoice often.</p>
+              <ul>
+                <li>Unlimited invoices</li>
+                <li>Your logo and company details</li>
+                <li>Save, print and export PDF</li>
+                <li>Secure invoice history</li>
+              </ul>
+              <button
+                className="button primary large"
+                onClick={() => setShowAuth(true)}
+              >
+                Choose Pro
+              </button>
+            </article>
+          </div>
+        </section>
+
+        <footer className="marketing-footer">
+          <span>© 2026 DASHBOARD A.I LTD</span>
+          <span>Company no. 17319299</span>
+        </footer>
+
+        {showAuth && (
+          <div className="auth-overlay" role="dialog" aria-modal="true">
+            <div className="auth-card">
+              <button
+                className="auth-close"
+                aria-label="Close"
+                onClick={() => setShowAuth(false)}
+              >
+                ×
+              </button>
+              <img src="/dashboard-ai-logo-full.png" alt="Dashboard AI" />
+              <span className="hero-kicker">
+                {authMode === "signup" ? "CREATE YOUR ACCOUNT" : "WELCOME BACK"}
+              </span>
+              <h2>{authMode === "signup" ? "Start invoicing" : "Sign in"}</h2>
+              <p>
+                {authMode === "signup"
+                  ? "Create your secure account, then choose a plan."
+                  : "Enter your details to open your dashboard."}
+              </p>
+              {!isSupabaseConfigured && (
+                <div className="setup-notice">
+                  Customer accounts are waiting for the new Supabase project to
+                  be connected.
                 </div>
               )}
-            </section>
-          </div>
-        )}
-
-        {activeView === "company" && (
-          <div className="company-view no-print">
-            <section className="panel company-panel">
-              <img
-                className="company-logo"
-                src="/dashboard-ai-logo-full.png"
-                alt="Dashboard AI logo"
-              />
-              <span className="eyebrow">INVOICE SENDER</span>
-              <h2>{COMPANY.name}</h2>
-              <p>{COMPANY.address}</p>
-              <dl>
-                <div>
-                  <dt>Company number</dt>
-                  <dd>{COMPANY.number}</dd>
-                </div>
-                <div>
-                  <dt>Account number</dt>
-                  <dd>{COMPANY.account}</dd>
-                </div>
-                <div>
-                  <dt>Sort code</dt>
-                  <dd>{COMPANY.sortCode}</dd>
-                </div>
-              </dl>
-              <p className="helper">
-                These details are automatically shown on every invoice.
-              </p>
-            </section>
-          </div>
-        )}
-
-        {activeView === "invoices" && (
-          <div className="invoice-workspace">
-            <section className="editor no-print">
-              <div className="editor-section">
-                <div className="section-heading">
-                  <span>01</span>
-                  <div>
-                    <h2>Invoice details</h2>
-                    <p>Set the invoice number and payment dates.</p>
-                  </div>
-                </div>
-                <div className="form-grid three">
-                  <label>
-                    Invoice number
-                    <input
-                      value={invoice.number}
-                      onChange={(event) => update("number", event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Issue date
-                    <input
-                      type="date"
-                      value={invoice.issueDate}
-                      onChange={(event) => update("issueDate", event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Due date
-                    <input
-                      type="date"
-                      value={invoice.dueDate}
-                      onChange={(event) => update("dueDate", event.target.value)}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="editor-section">
-                <div className="section-heading">
-                  <span>02</span>
-                  <div>
-                    <h2>Bill to</h2>
-                    <p>Add your customer’s contact details.</p>
-                  </div>
-                </div>
-                <div className="form-grid">
-                  <label>
-                    Client or company name
-                    <input
-                      placeholder="e.g. Northstar Studio Ltd"
-                      value={invoice.client}
-                      onChange={(event) => update("client", event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Email address
-                    <input
-                      type="email"
-                      placeholder="accounts@client.co.uk"
-                      value={invoice.email}
-                      onChange={(event) => update("email", event.target.value)}
-                    />
-                  </label>
-                  <label className="full">
-                    Billing address
-                    <textarea
-                      rows={2}
-                      placeholder="Client billing address"
-                      value={invoice.address}
-                      onChange={(event) => update("address", event.target.value)}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="editor-section">
-                <div className="section-heading">
-                  <span>03</span>
-                  <div>
-                    <h2>Items</h2>
-                    <p>Add the work, products, or services supplied.</p>
-                  </div>
-                </div>
-                <div className="items-editor">
-                  <div className="item-labels">
-                    <span>Description</span>
-                    <span>Qty</span>
-                    <span>Rate</span>
-                    <span>Total</span>
-                    <span />
-                  </div>
-                  {invoice.items.map((item) => (
-                    <div className="item-row" key={item.id}>
-                      <input
-                        aria-label="Item description"
-                        placeholder="Description of work"
-                        value={item.description}
-                        onChange={(event) =>
-                          updateItem(item.id, "description", event.target.value)
-                        }
-                      />
-                      <input
-                        aria-label="Quantity"
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={item.quantity}
-                        onChange={(event) =>
-                          updateItem(item.id, "quantity", Number(event.target.value))
-                        }
-                      />
-                      <input
-                        aria-label="Rate"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.rate}
-                        onChange={(event) =>
-                          updateItem(item.id, "rate", Number(event.target.value))
-                        }
-                      />
-                      <strong>{money(item.quantity * item.rate)}</strong>
-                      <button
-                        aria-label="Remove item"
-                        className="remove-item"
-                        onClick={() =>
-                          update(
-                            "items",
-                            invoice.items.filter((line) => line.id !== item.id),
-                          )
-                        }
-                        disabled={invoice.items.length === 1}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  <button className="add-item" onClick={addItem}>
-                    + Add another item
-                  </button>
-                </div>
-              </div>
-
-              <div className="editor-section totals-editor">
+              <form onSubmit={handleAuth}>
                 <label>
-                  VAT rate
-                  <select
-                    value={invoice.vatRate}
-                    onChange={(event) => update("vatRate", Number(event.target.value))}
-                  >
-                    <option value={0}>No VAT (0%)</option>
-                    <option value={5}>Reduced rate (5%)</option>
-                    <option value={20}>Standard rate (20%)</option>
-                  </select>
-                </label>
-                <div className="totals-box">
-                  <div>
-                    <span>Subtotal</span>
-                    <strong>{money(totals.subtotal)}</strong>
-                  </div>
-                  <div>
-                    <span>VAT ({invoice.vatRate}%)</span>
-                    <strong>{money(totals.vat)}</strong>
-                  </div>
-                  <div className="grand-total">
-                    <span>Total due</span>
-                    <strong>{money(totals.total)}</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div className="editor-section">
-                <label>
-                  Notes and payment terms
-                  <textarea
-                    rows={3}
-                    value={invoice.notes}
-                    onChange={(event) => update("notes", event.target.value)}
+                  Email address
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@company.co.uk"
                   />
                 </label>
-              </div>
-
-              <div className="editor-actions">
-                <button className="button secondary" onClick={() => saveInvoice("Draft")}>
-                  Save as draft
+                <label>
+                  Password
+                  <input
+                    type="password"
+                    required
+                    minLength={8}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="At least 8 characters"
+                  />
+                </label>
+                {message && <p className="form-message">{message}</p>}
+                <button
+                  className="button primary large"
+                  disabled={working || !isSupabaseConfigured}
+                >
+                  {working
+                    ? "Please wait…"
+                    : authMode === "signup"
+                      ? "Create account"
+                      : "Sign in"}
                 </button>
-                <button className="button secondary" onClick={() => saveInvoice("Sent")}>
-                  Mark as sent
-                </button>
-                <button className="button primary" onClick={() => window.print()}>
-                  Print / Save PDF
-                </button>
-              </div>
-            </section>
-
-            <aside className="preview-wrap">
-              <span className="preview-label no-print">LIVE PREVIEW</span>
-              <article className="invoice-paper">
-                <div className="paper-top">
-                  <div className="invoice-brand">
-                    <img
-                      className="paper-logo"
-                      src="/dashboard-ai-logo-full.png"
-                      alt="Dashboard AI logo"
-                    />
-                    <div>
-                      <strong>{COMPANY.name}</strong>
-                      <p>{COMPANY.address}</p>
-                      <p>Company no. {COMPANY.number}</p>
-                    </div>
-                  </div>
-                  <div className="invoice-title">
-                    <span>INVOICE</span>
-                    <strong>{invoice.number}</strong>
-                  </div>
-                </div>
-
-                <div className="invoice-meta">
-                  <div>
-                    <span>BILL TO</span>
-                    <strong>{invoice.client || "Client name"}</strong>
-                    {invoice.address ? (
-                      <p className="preline">{invoice.address}</p>
-                    ) : (
-                      <p>Client billing address</p>
-                    )}
-                    {invoice.email && <p>{invoice.email}</p>}
-                  </div>
-                  <dl>
-                    <div>
-                      <dt>Issue date</dt>
-                      <dd>{invoice.issueDate}</dd>
-                    </div>
-                    <div>
-                      <dt>Due date</dt>
-                      <dd>{invoice.dueDate}</dd>
-                    </div>
-                  </dl>
-                </div>
-
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Description</th>
-                      <th>Qty</th>
-                      <th>Rate</th>
-                      <th>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {invoice.items.map((item) => (
-                      <tr key={item.id}>
-                        <td>{item.description || "Invoice item"}</td>
-                        <td>{item.quantity}</td>
-                        <td>{money(item.rate)}</td>
-                        <td>{money(item.quantity * item.rate)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                <div className="paper-totals">
-                  <div>
-                    <span>Subtotal</span>
-                    <strong>{money(totals.subtotal)}</strong>
-                  </div>
-                  <div>
-                    <span>VAT ({invoice.vatRate}%)</span>
-                    <strong>{money(totals.vat)}</strong>
-                  </div>
-                  <div>
-                    <span>Total due</span>
-                    <strong>{money(totals.total)}</strong>
-                  </div>
-                </div>
-
-                <div className="payment-card">
-                  <span>PAYMENT DETAILS</span>
-                  <strong>{COMPANY.name}</strong>
-                  <div>
-                    <p>Sort code <b>{COMPANY.sortCode}</b></p>
-                    <p>Account number <b>{COMPANY.account}</b></p>
-                    <p>Reference <b>{invoice.number}</b></p>
-                  </div>
-                </div>
-
-                <div className="invoice-notes">
-                  <span>NOTES</span>
-                  <p>{invoice.notes}</p>
-                </div>
-
-                <footer>
-                  <span>{COMPANY.name}</span>
-                  <span>{COMPANY.number}</span>
-                  <span>dashboard-ai.co.uk</span>
-                </footer>
-              </article>
-            </aside>
+              </form>
+              <button
+                className="auth-switch"
+                onClick={() =>
+                  setAuthMode((current) =>
+                    current === "signup" ? "signin" : "signup",
+                  )
+                }
+              >
+                {authMode === "signup"
+                  ? "Already have an account? Sign in"
+                  : "Need an account? Sign up"}
+              </button>
+            </div>
           </div>
         )}
-      </section>
-    </main>
+      </main>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <main className="saas-loading">
+        <p>{message || "Loading your account…"}</p>
+        <button className="button secondary" onClick={() => supabase?.auth.signOut()}>
+          Sign out
+        </button>
+      </main>
+    );
+  }
+
+  const hasAccess =
+    profile.owner_bypass ||
+    ((profile.plan === "starter" || profile.plan === "pro") &&
+      ["active", "trialing"].includes(profile.subscription_status));
+
+  if (!hasAccess) {
+    return (
+      <main className="onboarding-shell">
+        <div className="onboarding-brand">
+          <img src="/dashboard-ai-logo-full.png" alt="Dashboard AI" />
+          <strong>Choose your plan</strong>
+          <button onClick={() => supabase?.auth.signOut()}>Sign out</button>
+        </div>
+        <div className="onboarding-content">
+          <span className="hero-kicker">STEP 2 OF 3</span>
+          <h1>Choose how many invoices you need</h1>
+          <p>Your secure account is ready. Select a monthly plan to continue.</p>
+          <div className="pricing-grid compact">
+            <article className="price-card">
+              <span>STARTER</span>
+              <h3>£5 <small>/ month</small></h3>
+              <ul>
+                <li>Up to 20 invoices monthly</li>
+                <li>Logo and company details</li>
+                <li>PDF-ready invoices</li>
+              </ul>
+              <button
+                className="button secondary large"
+                disabled={working}
+                onClick={() => choosePlan("starter")}
+              >
+                Choose £5 plan
+              </button>
+            </article>
+            <article className="price-card featured">
+              <div className="popular">BEST FOR GROWTH</div>
+              <span>PRO</span>
+              <h3>£20 <small>/ month</small></h3>
+              <ul>
+                <li>Unlimited invoices</li>
+                <li>Logo and company details</li>
+                <li>PDF-ready invoices</li>
+              </ul>
+              <button
+                className="button primary large"
+                disabled={working}
+                onClick={() => choosePlan("pro")}
+              >
+                Choose £20 plan
+              </button>
+            </article>
+          </div>
+          <form className="owner-code" onSubmit={redeemOwnerCode}>
+            <label>
+              Owner access code
+              <input
+                type="password"
+                inputMode="numeric"
+                value={ownerCode}
+                onChange={(event) => setOwnerCode(event.target.value)}
+                placeholder="Enter code"
+              />
+            </label>
+            <button className="button secondary" disabled={working}>
+              Apply code
+            </button>
+          </form>
+          {message && <p className="form-message">{message}</p>}
+        </div>
+      </main>
+    );
+  }
+
+  if (editingCompany || !profile.company_name) {
+    return (
+      <main className="onboarding-shell">
+        <div className="onboarding-brand">
+          <img src="/dashboard-ai-logo-full.png" alt="Dashboard AI" />
+          <strong>Your company details</strong>
+          {profile.company_name && (
+            <button onClick={() => setEditingCompany(false)}>Back to invoices</button>
+          )}
+        </div>
+        <div className="company-setup">
+          <span className="hero-kicker">
+            {profile.company_name ? "COMPANY SETTINGS" : "STEP 3 OF 3"}
+          </span>
+          <h1>Make every invoice yours</h1>
+          <p>Add the details customers should see on your invoices.</p>
+          <form onSubmit={saveCompany}>
+            <div className="logo-uploader">
+              <img
+                src={companyDraft.logoUrl || "/dashboard-ai-logo-full.png"}
+                alt="Company logo preview"
+              />
+              <label className="button secondary">
+                Upload logo
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) => uploadLogo(event.target.files?.[0])}
+                />
+              </label>
+              <small>PNG, JPG or WebP. Maximum 2 MB.</small>
+            </div>
+            <div className="company-form-grid">
+              <label>
+                Company name
+                <input
+                  required
+                  value={companyDraft.name}
+                  onChange={(event) =>
+                    setCompanyDraft({ ...companyDraft, name: event.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Company number
+                <input
+                  value={companyDraft.companyNumber}
+                  onChange={(event) =>
+                    setCompanyDraft({
+                      ...companyDraft,
+                      companyNumber: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label className="full">
+                Business address
+                <textarea
+                  required
+                  rows={3}
+                  value={companyDraft.address}
+                  onChange={(event) =>
+                    setCompanyDraft({
+                      ...companyDraft,
+                      address: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Bank account number
+                <input
+                  value={companyDraft.accountNumber}
+                  onChange={(event) =>
+                    setCompanyDraft({
+                      ...companyDraft,
+                      accountNumber: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Sort code
+                <input
+                  value={companyDraft.sortCode}
+                  onChange={(event) =>
+                    setCompanyDraft({
+                      ...companyDraft,
+                      sortCode: event.target.value,
+                    })
+                  }
+                />
+              </label>
+            </div>
+            {message && <p className="form-message">{message}</p>}
+            <button className="button primary large" disabled={working}>
+              {working ? "Saving…" : "Save and open dashboard"}
+            </button>
+          </form>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <InvoiceDashboard
+      company={profileToCompany(profile)}
+      userId={session.user.id}
+      plan={
+        profile.plan === "pro"
+          ? "pro"
+          : profile.plan === "starter"
+            ? "starter"
+            : "owner"
+      }
+      storedInvoices={invoices}
+      onSaveInvoice={saveInvoice}
+      onEditCompany={() => setEditingCompany(true)}
+      onManageBilling={manageBilling}
+      onSignOut={() => supabase?.auth.signOut()}
+    />
   );
 }
