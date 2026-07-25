@@ -102,7 +102,7 @@ $$;
 
 revoke all on function app_private.handle_new_user() from public;
 
-create trigger on_auth_user_created
+create trigger invoice_app_on_auth_user_created
   after insert on auth.users
   for each row execute function app_private.handle_new_user();
 
