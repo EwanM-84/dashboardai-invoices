@@ -32,7 +32,7 @@ const previewCompany: CompanyProfile = {
   companyNumber: "17319299",
   accountNumber: "90411675",
   sortCode: "23-01-63",
-  logoUrl: "/dashboard-ai-logo-mark.png",
+  logoUrl: "/dashboard-ai-logo-light.png",
 };
 
 function profileToCompany(profile: Profile): CompanyProfile {
@@ -91,7 +91,11 @@ export default function Home() {
     if (!supabase || !session) return;
     setLoading(true);
     const [profileResult, invoiceResult] = await Promise.all([
-      supabase.from("profiles").select("*").eq("id", session.user.id).single(),
+      supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", session.user.id)
+        .maybeSingle(),
       supabase
         .from("invoices")
         .select("data")
@@ -99,10 +103,28 @@ export default function Home() {
         .order("created_at", { ascending: false }),
     ]);
 
-    if (profileResult.error) {
-      setMessage(profileResult.error.message);
+    let profileData = profileResult.data as Profile | null;
+    let profileError = profileResult.error;
+
+    if (!profileError && !profileData) {
+      const repairResult = await supabase
+        .from("profiles")
+        .insert({
+          id: session.user.id,
+          email: session.user.email ?? null,
+        })
+        .select("*")
+        .single();
+      profileData = repairResult.data as Profile | null;
+      profileError = repairResult.error;
+    }
+
+    if (profileError || !profileData) {
+      setMessage(
+        profileError?.message ?? "Your account profile could not be prepared.",
+      );
     } else {
-      const nextProfile = profileResult.data as Profile;
+      const nextProfile = profileData;
       setProfile(nextProfile);
       setCompanyDraft(profileToCompany(nextProfile));
       if (!nextProfile.company_name) setEditingCompany(true);
@@ -271,7 +293,7 @@ export default function Home() {
   if (loading) {
     return (
       <main className="saas-loading">
-        <img src="/dashboard-ai-logo-mark.png" alt="Dashboard AI" />
+        <img src="/dashboard-ai-logo-light.png" alt="Dashboard AI" />
         <p>Preparing your invoice studio…</p>
       </main>
     );
@@ -293,7 +315,7 @@ export default function Home() {
       <main className="saas-public">
         <header className="marketing-nav">
           <div className="marketing-brand">
-            <img src="/dashboard-ai-logo-mark.png" alt="Dashboard AI" />
+            <img src="/dashboard-ai-logo-light.png" alt="Dashboard AI" />
             <div>
               <strong>Dashboard A.I</strong>
               <span>Invoice Studio</span>
@@ -418,7 +440,7 @@ export default function Home() {
               >
                 ×
               </button>
-              <img src="/dashboard-ai-logo-mark.png" alt="Dashboard AI" />
+              <img src="/dashboard-ai-logo-light.png" alt="Dashboard AI" />
               <span className="hero-kicker">
                 {authMode === "signup" ? "CREATE YOUR ACCOUNT" : "WELCOME BACK"}
               </span>
@@ -440,6 +462,7 @@ export default function Home() {
                   <input
                     type="email"
                     required
+                    autoComplete="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     placeholder="you@company.co.uk"
@@ -451,6 +474,9 @@ export default function Home() {
                     type="password"
                     required
                     minLength={8}
+                    autoComplete={
+                      authMode === "signup" ? "new-password" : "current-password"
+                    }
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     placeholder="At least 8 characters"
@@ -507,7 +533,7 @@ export default function Home() {
     return (
       <main className="onboarding-shell">
         <div className="onboarding-brand">
-          <img src="/dashboard-ai-logo-mark.png" alt="Dashboard AI" />
+          <img src="/dashboard-ai-logo-light.png" alt="Dashboard AI" />
           <strong>Choose your plan</strong>
           <button onClick={() => supabase?.auth.signOut()}>Sign out</button>
         </div>
@@ -575,7 +601,7 @@ export default function Home() {
     return (
       <main className="onboarding-shell">
         <div className="onboarding-brand">
-          <img src="/dashboard-ai-logo-mark.png" alt="Dashboard AI" />
+          <img src="/dashboard-ai-logo-light.png" alt="Dashboard AI" />
           <strong>Your company details</strong>
           {profile.company_name && (
             <button onClick={() => setEditingCompany(false)}>Back to invoices</button>
@@ -590,7 +616,7 @@ export default function Home() {
           <form onSubmit={saveCompany}>
             <div className="logo-uploader">
               <img
-                src={companyDraft.logoUrl || "/dashboard-ai-logo-mark.png"}
+                src={companyDraft.logoUrl || "/dashboard-ai-logo-light.png"}
                 alt="Company logo preview"
               />
               <label className="button secondary">

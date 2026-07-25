@@ -39,7 +39,7 @@ const DEFAULT_COMPANY: CompanyProfile = {
   companyNumber: "17319299",
   accountNumber: "90411675",
   sortCode: "23-01-63",
-  logoUrl: "/dashboard-ai-logo-mark.png",
+  logoUrl: "/dashboard-ai-logo-light.png",
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -294,7 +294,7 @@ export default function InvoiceDashboard({
       addPageHeader();
 
       const logo = await loadPdfImage(
-        company.logoUrl || "/dashboard-ai-logo-mark.png",
+        company.logoUrl || "/dashboard-ai-logo-light.png",
       );
       if (logo) {
         try {
@@ -508,7 +508,7 @@ export default function InvoiceDashboard({
         <div className="brand">
           <img
             className="brand-logo"
-            src="/dashboard-ai-logo-mark.png"
+            src="/dashboard-ai-logo-light.png"
             alt="Dashboard AI logo"
           />
           <div>
@@ -571,14 +571,14 @@ export default function InvoiceDashboard({
                 ? "Business overview"
                 : activeView === "company"
                   ? "Company details"
-                  : "Create a polished invoice"}
+                  : "Create invoice"}
             </h1>
             <p>
               {activeView === "overview"
                 ? "Track drafts, outstanding invoices and paid revenue."
                 : activeView === "company"
                   ? "The details displayed on every customer invoice."
-                  : "Build, save and download an A4-ready customer invoice."}
+                  : "Add the details once, review the result and download a finished PDF."}
             </p>
           </div>
           <div className="top-actions">
@@ -681,7 +681,7 @@ export default function InvoiceDashboard({
             <section className="panel company-panel">
               <img
                 className="company-logo"
-                src={company.logoUrl || "/dashboard-ai-logo-mark.png"}
+                src={company.logoUrl || "/dashboard-ai-logo-light.png"}
                 alt={`${company.name} logo`}
               />
               <span className="eyebrow">INVOICE SENDER</span>
@@ -915,15 +915,15 @@ export default function InvoiceDashboard({
 
             <aside className="preview-wrap">
               <div className="preview-heading no-print">
-                <span className="preview-label">A4 LIVE PREVIEW</span>
-                <span>Updates as you type</span>
+                <span className="preview-label">INVOICE PREVIEW</span>
+                <span>A4 · Updates as you type</span>
               </div>
               <article className="invoice-paper">
                 <div className="paper-top">
                   <div className="invoice-brand">
                     <img
                       className="paper-logo"
-                      src={company.logoUrl || "/dashboard-ai-logo-mark.png"}
+                      src={company.logoUrl || "/dashboard-ai-logo-light.png"}
                       alt={`${company.name} logo`}
                     />
                     <div>
