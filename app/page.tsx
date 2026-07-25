@@ -332,7 +332,7 @@ export default function Home() {
             <div className="trust-line">
               <span>✓ Secure customer accounts</span>
               <span>✓ Cancel anytime</span>
-              <span>✓ Print or save PDF</span>
+              <span>✓ Direct PDF downloads</span>
             </div>
           </div>
           <div className="hero-product">
@@ -372,7 +372,7 @@ export default function Home() {
               <ul>
                 <li>Up to 20 invoices each month</li>
                 <li>Your logo and company details</li>
-                <li>Save, print and export PDF</li>
+                <li>Download polished PDF invoices</li>
                 <li>Secure invoice history</li>
               </ul>
               <button
@@ -390,7 +390,7 @@ export default function Home() {
               <ul>
                 <li>Unlimited invoices</li>
                 <li>Your logo and company details</li>
-                <li>Save, print and export PDF</li>
+                <li>Download polished PDF invoices</li>
                 <li>Secure invoice history</li>
               </ul>
               <button

@@ -593,9 +593,6 @@ export default function InvoiceDashboard({
                 <span className={`status ${invoice.status.toLowerCase()}`}>
                   {invoice.status}
                 </span>
-                <button className="button quiet" onClick={() => window.print()}>
-                  Print
-                </button>
                 <button
                   className="button secondary"
                   onClick={() => saveInvoice("Draft")}
@@ -905,9 +902,6 @@ export default function InvoiceDashboard({
                 </button>
                 <button className="button secondary" onClick={() => saveInvoice("Sent")}>
                   Mark as sent
-                </button>
-                <button className="button quiet" onClick={() => window.print()}>
-                  Print
                 </button>
                 <button
                   className="button primary"
