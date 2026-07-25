@@ -32,7 +32,7 @@ const previewCompany: CompanyProfile = {
   companyNumber: "17319299",
   accountNumber: "90411675",
   sortCode: "23-01-63",
-  logoUrl: "/dashboard-ai-logo-full.png",
+  logoUrl: "/dashboard-ai-logo-mark.png",
 };
 
 function profileToCompany(profile: Profile): CompanyProfile {
@@ -271,7 +271,7 @@ export default function Home() {
   if (loading) {
     return (
       <main className="saas-loading">
-        <img src="/dashboard-ai-logo-full.png" alt="Dashboard AI" />
+        <img src="/dashboard-ai-logo-mark.png" alt="Dashboard AI" />
         <p>Preparing your invoice studio…</p>
       </main>
     );
@@ -293,7 +293,7 @@ export default function Home() {
       <main className="saas-public">
         <header className="marketing-nav">
           <div className="marketing-brand">
-            <img src="/dashboard-ai-logo-full.png" alt="Dashboard AI" />
+            <img src="/dashboard-ai-logo-mark.png" alt="Dashboard AI" />
             <div>
               <strong>Dashboard A.I</strong>
               <span>Invoice Studio</span>
@@ -418,7 +418,7 @@ export default function Home() {
               >
                 ×
               </button>
-              <img src="/dashboard-ai-logo-full.png" alt="Dashboard AI" />
+              <img src="/dashboard-ai-logo-mark.png" alt="Dashboard AI" />
               <span className="hero-kicker">
                 {authMode === "signup" ? "CREATE YOUR ACCOUNT" : "WELCOME BACK"}
               </span>
@@ -507,7 +507,7 @@ export default function Home() {
     return (
       <main className="onboarding-shell">
         <div className="onboarding-brand">
-          <img src="/dashboard-ai-logo-full.png" alt="Dashboard AI" />
+          <img src="/dashboard-ai-logo-mark.png" alt="Dashboard AI" />
           <strong>Choose your plan</strong>
           <button onClick={() => supabase?.auth.signOut()}>Sign out</button>
         </div>
@@ -575,7 +575,7 @@ export default function Home() {
     return (
       <main className="onboarding-shell">
         <div className="onboarding-brand">
-          <img src="/dashboard-ai-logo-full.png" alt="Dashboard AI" />
+          <img src="/dashboard-ai-logo-mark.png" alt="Dashboard AI" />
           <strong>Your company details</strong>
           {profile.company_name && (
             <button onClick={() => setEditingCompany(false)}>Back to invoices</button>
@@ -590,7 +590,7 @@ export default function Home() {
           <form onSubmit={saveCompany}>
             <div className="logo-uploader">
               <img
-                src={companyDraft.logoUrl || "/dashboard-ai-logo-full.png"}
+                src={companyDraft.logoUrl || "/dashboard-ai-logo-mark.png"}
                 alt="Company logo preview"
               />
               <label className="button secondary">

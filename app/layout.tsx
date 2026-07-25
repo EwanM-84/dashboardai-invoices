@@ -26,8 +26,8 @@ export async function generateMetadata(): Promise<Metadata> {
     description:
       "Create branded invoices, save customer history, and export professional PDFs from £5 per month.",
     icons: {
-      icon: "/dashboard-ai-logo-full.png",
-      shortcut: "/dashboard-ai-logo-full.png",
+      icon: "/dashboard-ai-logo-mark.png",
+      shortcut: "/dashboard-ai-logo-mark.png",
     },
     openGraph: {
       title: "Dashboard A.I — Professional Invoice Maker",

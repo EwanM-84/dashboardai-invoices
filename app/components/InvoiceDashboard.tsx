@@ -39,7 +39,7 @@ const DEFAULT_COMPANY: CompanyProfile = {
   companyNumber: "17319299",
   accountNumber: "90411675",
   sortCode: "23-01-63",
-  logoUrl: "/dashboard-ai-logo-full.png",
+  logoUrl: "/dashboard-ai-logo-mark.png",
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -53,6 +53,42 @@ const money = (value: number) =>
     style: "currency",
     currency: "GBP",
   }).format(value);
+
+const pdfMoney = (value: number) =>
+  `£${Number(value || 0).toLocaleString("en-GB", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const safeFileName = (value: string) =>
+  value
+    .trim()
+    .replace(/[^a-z0-9-_]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "invoice";
+
+async function loadPdfImage(url: string) {
+  if (!url) return null;
+  try {
+    const response = await fetch(new URL(url, window.location.href));
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    const format = blob.type.includes("jpeg")
+      ? "JPEG"
+      : blob.type.includes("webp")
+        ? "WEBP"
+        : "PNG";
+    return { dataUrl, format };
+  } catch {
+    return null;
+  }
+}
 
 const blankInvoice = (number = "INV-0001"): Invoice => ({
   id: `invoice-${Date.now()}`,
@@ -116,6 +152,7 @@ export default function InvoiceDashboard({
     () => storedInvoices?.[0] ?? blankInvoice(),
   );
   const [savedMessage, setSavedMessage] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     if (storedInvoices) return;
@@ -214,13 +251,264 @@ export default function InvoiceDashboard({
     ]);
   };
 
+  const downloadPdf = async () => {
+    setIsExporting(true);
+    setSavedMessage("Preparing your PDF…");
+
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 18;
+      const contentWidth = pageWidth - margin * 2;
+      const navy: [number, number, number] = [11, 20, 40];
+      const blue: [number, number, number] = [49, 87, 231];
+      const slate: [number, number, number] = [82, 96, 117];
+      const pale: [number, number, number] = [242, 245, 251];
+      const line: [number, number, number] = [224, 229, 239];
+      let y = 18;
+
+      const addPageHeader = (continuation = false) => {
+        doc.setFillColor(...navy);
+        doc.rect(0, 0, pageWidth, 5, "F");
+        doc.setTextColor(...navy);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text(company.name, margin, 17);
+        doc.setTextColor(...slate);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.text(
+          continuation ? `${invoice.number} · Continued` : "Professional invoice",
+          pageWidth - margin,
+          17,
+          { align: "right" },
+        );
+      };
+
+      addPageHeader();
+
+      const logo = await loadPdfImage(
+        company.logoUrl || "/dashboard-ai-logo-mark.png",
+      );
+      if (logo) {
+        try {
+          doc.addImage(logo.dataUrl, logo.format, margin, 23, 18, 18);
+        } catch {
+          // The company name remains as a reliable fallback if an uploaded
+          // image format cannot be embedded by the browser PDF engine.
+        }
+      }
+
+      doc.setTextColor(...navy);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(25);
+      doc.text("INVOICE", pageWidth - margin, 32, { align: "right" });
+      doc.setTextColor(...blue);
+      doc.setFontSize(10);
+      doc.text(invoice.number, pageWidth - margin, 40, { align: "right" });
+
+      doc.setTextColor(...slate);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      const companyAddress = doc.splitTextToSize(company.address, 82);
+      doc.text(companyAddress, margin, 45);
+      doc.text(
+        `Company number: ${company.companyNumber || "Not added"}`,
+        margin,
+        45 + companyAddress.length * 4,
+      );
+
+      y = 66;
+      doc.setFillColor(...pale);
+      doc.roundedRect(margin, y, contentWidth, 36, 2.5, 2.5, "F");
+      doc.setTextColor(...blue);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.text("BILL TO", margin + 6, y + 8);
+      doc.setTextColor(...navy);
+      doc.setFontSize(11);
+      doc.text(invoice.client || "Client name", margin + 6, y + 16);
+      doc.setTextColor(...slate);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      const clientLines = doc.splitTextToSize(
+        [invoice.address, invoice.email].filter(Boolean).join(" · ") ||
+          "Client billing details",
+        92,
+      );
+      doc.text(clientLines.slice(0, 3), margin + 6, y + 22);
+
+      const datesX = pageWidth - margin - 55;
+      doc.setTextColor(...slate);
+      doc.setFontSize(7);
+      doc.text("ISSUE DATE", datesX, y + 9);
+      doc.text("DUE DATE", datesX, y + 23);
+      doc.setTextColor(...navy);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text(invoice.issueDate, pageWidth - margin - 6, y + 9, {
+        align: "right",
+      });
+      doc.text(invoice.dueDate, pageWidth - margin - 6, y + 23, {
+        align: "right",
+      });
+
+      const drawTableHeader = (top: number) => {
+        doc.setFillColor(...navy);
+        doc.roundedRect(margin, top, contentWidth, 10, 1.5, 1.5, "F");
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.text("DESCRIPTION", margin + 4, top + 6.5);
+        doc.text("QTY", 131, top + 6.5, { align: "right" });
+        doc.text("RATE", 158, top + 6.5, { align: "right" });
+        doc.text("AMOUNT", pageWidth - margin - 4, top + 6.5, {
+          align: "right",
+        });
+      };
+
+      y = 111;
+      drawTableHeader(y);
+      y += 10;
+
+      invoice.items.forEach((item) => {
+        const description = doc.splitTextToSize(
+          item.description || "Invoice item",
+          92,
+        );
+        const rowHeight = Math.max(12, description.length * 4 + 5);
+
+        if (y + rowHeight > pageHeight - 58) {
+          doc.addPage();
+          addPageHeader(true);
+          y = 26;
+          drawTableHeader(y);
+          y += 10;
+        }
+
+        doc.setTextColor(...navy);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.text(description, margin + 4, y + 7);
+        doc.text(String(item.quantity), 131, y + 7, { align: "right" });
+        doc.text(pdfMoney(item.rate), 158, y + 7, { align: "right" });
+        doc.setFont("helvetica", "bold");
+        doc.text(
+          pdfMoney(item.quantity * item.rate),
+          pageWidth - margin - 4,
+          y + 7,
+          { align: "right" },
+        );
+        doc.setDrawColor(...line);
+        doc.line(margin, y + rowHeight, pageWidth - margin, y + rowHeight);
+        y += rowHeight;
+      });
+
+      if (y > pageHeight - 92) {
+        doc.addPage();
+        addPageHeader(true);
+        y = 28;
+      }
+
+      const totalsX = 122;
+      y += 9;
+      doc.setTextColor(...slate);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text("Subtotal", totalsX, y);
+      doc.text(pdfMoney(totals.subtotal), pageWidth - margin, y, {
+        align: "right",
+      });
+      y += 8;
+      doc.text(`VAT (${invoice.vatRate}%)`, totalsX, y);
+      doc.text(pdfMoney(totals.vat), pageWidth - margin, y, {
+        align: "right",
+      });
+      y += 6;
+      doc.setDrawColor(...line);
+      doc.line(totalsX, y, pageWidth - margin, y);
+      y += 9;
+      doc.setTextColor(...navy);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Total due", totalsX, y);
+      doc.text(pdfMoney(totals.total), pageWidth - margin, y, {
+        align: "right",
+      });
+
+      y += 14;
+      doc.setFillColor(...navy);
+      doc.roundedRect(margin, y, contentWidth, 29, 2.5, 2.5, "F");
+      doc.setTextColor(146, 178, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.text("PAYMENT DETAILS", margin + 6, y + 8);
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(8);
+      doc.text(
+        `Account name  ${company.name}`,
+        margin + 6,
+        y + 17,
+      );
+      doc.text(
+        `Sort code  ${company.sortCode || "Not added"}`,
+        margin + 6,
+        y + 24,
+      );
+      doc.text(
+        `Account number  ${company.accountNumber || "Not added"}`,
+        95,
+        y + 17,
+      );
+      doc.text(`Reference  ${invoice.number}`, 95, y + 24);
+
+      if (invoice.notes) {
+        y += 39;
+        doc.setTextColor(...blue);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.text("NOTES & PAYMENT TERMS", margin, y);
+        doc.setTextColor(...slate);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.text(doc.splitTextToSize(invoice.notes, contentWidth), margin, y + 7);
+      }
+
+      doc.setDrawColor(...line);
+      doc.line(margin, pageHeight - 17, pageWidth - margin, pageHeight - 17);
+      doc.setTextColor(...slate);
+      doc.setFontSize(7);
+      doc.text(company.name, margin, pageHeight - 11);
+      doc.text("Created with Dashboard A.I", pageWidth - margin, pageHeight - 11, {
+        align: "right",
+      });
+
+      const clientPart = invoice.client ? `-${safeFileName(invoice.client)}` : "";
+      doc.save(`${safeFileName(invoice.number)}${clientPart}.pdf`);
+      setSavedMessage("PDF downloaded");
+    } catch (error) {
+      setSavedMessage(
+        error instanceof Error ? error.message : "Could not create PDF",
+      );
+    } finally {
+      setIsExporting(false);
+      window.setTimeout(() => setSavedMessage(""), 3200);
+    }
+  };
+
   return (
     <main className="app-shell">
       <aside className="sidebar no-print">
         <div className="brand">
           <img
             className="brand-logo"
-            src="/dashboard-ai-logo-full.png"
+            src="/dashboard-ai-logo-mark.png"
             alt="Dashboard AI logo"
           />
           <div>
@@ -234,19 +522,19 @@ export default function InvoiceDashboard({
             className={activeView === "overview" ? "nav-item active" : "nav-item"}
             onClick={() => setActiveView("overview")}
           >
-            <span>⌂</span> Overview
+            <span>01</span> Overview
           </button>
           <button
             className={activeView === "invoices" ? "nav-item active" : "nav-item"}
             onClick={() => setActiveView("invoices")}
           >
-            <span>▤</span> Invoices
+            <span>02</span> Invoices
           </button>
           <button
             className={activeView === "company" ? "nav-item active" : "nav-item"}
             onClick={() => setActiveView("company")}
           >
-            <span>□</span> Company
+            <span>03</span> Company
           </button>
         </nav>
 
@@ -274,24 +562,55 @@ export default function InvoiceDashboard({
 
       <section className="workspace">
         <header className="topbar no-print">
-          <div>
-            <span className="eyebrow">{company.name}</span>
+          <div className="page-heading">
+            <span className="eyebrow">
+              {activeView === "invoices" ? "INVOICE WORKSPACE" : company.name}
+            </span>
             <h1>
               {activeView === "overview"
-                ? "Good afternoon"
+                ? "Business overview"
                 : activeView === "company"
                   ? "Company details"
-                  : "Create invoice"}
+                  : "Create a polished invoice"}
             </h1>
+            <p>
+              {activeView === "overview"
+                ? "Track drafts, outstanding invoices and paid revenue."
+                : activeView === "company"
+                  ? "The details displayed on every customer invoice."
+                  : "Build, save and download an A4-ready customer invoice."}
+            </p>
           </div>
           <div className="top-actions">
-            {savedMessage && <span className="saved-message">✓ {savedMessage}</span>}
-            <button className="button secondary" onClick={() => saveInvoice("Draft")}>
-              Save draft
-            </button>
-            <button className="button primary" onClick={() => window.print()}>
-              Print / PDF
-            </button>
+            {savedMessage && <span className="saved-message">{savedMessage}</span>}
+            {activeView === "overview" && (
+              <button className="button primary" onClick={createInvoice}>
+                New invoice
+              </button>
+            )}
+            {activeView === "invoices" && (
+              <>
+                <span className={`status ${invoice.status.toLowerCase()}`}>
+                  {invoice.status}
+                </span>
+                <button className="button quiet" onClick={() => window.print()}>
+                  Print
+                </button>
+                <button
+                  className="button secondary"
+                  onClick={() => saveInvoice("Draft")}
+                >
+                  Save draft
+                </button>
+                <button
+                  className="button primary"
+                  onClick={downloadPdf}
+                  disabled={isExporting}
+                >
+                  {isExporting ? "Creating PDF…" : "Download PDF"}
+                </button>
+              </>
+            )}
           </div>
         </header>
 
@@ -365,7 +684,7 @@ export default function InvoiceDashboard({
             <section className="panel company-panel">
               <img
                 className="company-logo"
-                src={company.logoUrl || "/dashboard-ai-logo-full.png"}
+                src={company.logoUrl || "/dashboard-ai-logo-mark.png"}
                 alt={`${company.name} logo`}
               />
               <span className="eyebrow">INVOICE SENDER</span>
@@ -587,20 +906,30 @@ export default function InvoiceDashboard({
                 <button className="button secondary" onClick={() => saveInvoice("Sent")}>
                   Mark as sent
                 </button>
-                <button className="button primary" onClick={() => window.print()}>
-                  Print / Save PDF
+                <button className="button quiet" onClick={() => window.print()}>
+                  Print
+                </button>
+                <button
+                  className="button primary"
+                  onClick={downloadPdf}
+                  disabled={isExporting}
+                >
+                  {isExporting ? "Creating PDF…" : "Download PDF"}
                 </button>
               </div>
             </section>
 
             <aside className="preview-wrap">
-              <span className="preview-label no-print">LIVE PREVIEW</span>
+              <div className="preview-heading no-print">
+                <span className="preview-label">A4 LIVE PREVIEW</span>
+                <span>Updates as you type</span>
+              </div>
               <article className="invoice-paper">
                 <div className="paper-top">
                   <div className="invoice-brand">
                     <img
                       className="paper-logo"
-                      src={company.logoUrl || "/dashboard-ai-logo-full.png"}
+                      src={company.logoUrl || "/dashboard-ai-logo-mark.png"}
                       alt={`${company.name} logo`}
                     />
                     <div>
